@@ -1,1 +1,7 @@
+Python==3.6.4
 Django==1.11
+sqlite3==2.6.0
+sqlite database
+
+Front-end
+D3v4
