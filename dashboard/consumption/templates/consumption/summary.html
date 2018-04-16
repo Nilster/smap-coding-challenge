@@ -1,7 +1,247 @@
 {% extends 'consumption/layout.html' %}
-
 {% block content %}
+<style>
+.line {
+    fill: none;
+    stroke: steelblue;
+    stroke-width: 1.5px;
+}
+.zoom {
+    cursor: move;
+    fill: none;
+    pointer-events: all;
+}
+.axis-title {
+    font-family: Arial, Helvetica, sans-serif;
+    text-anchor: middle;
+}
 
-<h1>{{message}}</h1>
+table {
+    font-family: arial, sans-serif;
+    border-collapse: collapse;
+    width: 100%;
+}
+th {
+    border: 1px solid #dddddd;
+    background-color: #0099cc;
+    color: white;
+    text-align: center;
+    padding: 8px;
+}
+td {
+    border: 1px solid #dddddd;
+    text-align: left;
+    padding: 8px;
+}
+
+tr:nth-child(even) {
+    background-color: #f2f2f2;;
+}
+</style>
+
+<div>
+    <div>
+        <svg id="all-users-graph" width="1000" height="500"></svg>
+    </div>
+    <div>
+        <h2 style="font-family: arial, sans-serif;">All Users</h2>
+    </div>
+    <div style="overflow: auto">
+        <table>
+                <tr>
+                    <th>#</th>
+                    <th>User</th>
+                    <th>Area</th>
+                    <th>Tariff</th>
+                    <th>Total Consumption (Wh)</th>
+                </tr>
+                {% for user in all_users %}
+                <tr> 
+                    <td>{{ forloop.counter }}</td>
+                    <td>{{ user.user_id }}</td>
+                    <td>{{ user.area }}</td>
+                    <td>{{ user.tariff }}</td>
+                    <td>{{ user.total_usage }}</td>
+                </tr>
+                {% endfor %}
+        </table>
+    </div>
+</div>
+
+
+<script>
+//Draw the graph from summary json using d3.js
+//Draw two kinds of graphs.
+//Graph1 for the zoomed in content and Graph2 for the overview map.
+
+var svg = d3.select("#all-users-graph");
+
+var margin = {top: 20, right: 20, bottom: 110, left: 70},
+    margin2 = {top: 430, right: 20, bottom: 30, left: 70},
+    width = +svg.attr("width") - margin.left - margin.right,
+    height = +svg.attr("height") - margin.top - margin.bottom,
+    height2 = +svg.attr("height") - margin2.top - margin2.bottom;
+
+//Define the scales for x and y axes and set the ranges
+var xScale = d3.scaleTime().range([0, width]),
+    yScale = d3.scaleLinear().range([height, 0]),
+    xScale2 = d3.scaleTime().range([0, width]),
+    yScale2 = d3.scaleLinear().range([height2, 0]);
+
+//d3's timestamp parser for the timestamp in the json received
+var parseTimeStamp = d3.utcParse("%Y-%m-%dT%H:%M:%SZ");
+
+var xAxis = d3.axisBottom(xScale),
+    yAxis = d3.axisLeft(yScale),
+    xAxis2 = d3.axisBottom(xScale2);
+    
+//Define d3's brush and zoom behaviour.
+//Brush on Graph2 and Zoom on Graph1
+var brush = d3.brushX()
+    .extent([[0, 0], [width, height2]])
+    .on("brush end", brushed);
+
+var zoom = d3.zoom()
+    .scaleExtent([1, Infinity])
+    .translateExtent([[0, 0], [width, height]])
+    .extent([[0, 0], [width, height]])
+    .on("zoom", zoomed);
+
+//Define the total usage line for both graphs
+var totalLine = d3.line()
+    .x(function(d) { return xScale(d.timestamp); })
+    .y(function(d) { return yScale(d.total_usage); });
+var totalLine2 = d3.line()
+    .x(function(d) { return xScale2(d.timestamp); })
+    .y(function(d) { return yScale2(d.total_usage); });
+
+//Define the clip-path to be used later
+var clip = svg.append("defs")
+            .append("svg:clipPath")
+                .attr("id", "clip")
+            .append("svg:rect")
+                .attr("width", width)
+                .attr("height", height)
+                .attr("x", 0)
+                .attr("y", 0); 
+
+//Graph1 clip path
+var Line_chart = svg.append("g")
+                .attr("class", "focus")
+                .attr("transform", "translate(" + margin.left + "," + margin.top + ")")
+                .attr("clip-path", "url(#clip)");
+
+//Add the graph1 (focus)
+var graph1 = svg.append("g")
+        .attr("class", "focus")
+        .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+//Add the graph2 (context)
+var graph2 = svg.append("g")
+        .attr("class", "context")
+        .attr("transform", "translate(" + margin2.left + "," + margin2.top + ")");
+
+//Draw the line graph for overall_summary_half_hour. 
+//The data is received from url http://127.0.0.1:8000/api/overall_summary_half_hour as json
+d3.json("{% url 'overall_summary_half_hour' %}", function(error, data) {
+    //format the data into its datatypes
+    data.forEach(function(d) {
+        d.timestamp = parseTimeStamp(d.timestamp);
+        d.total_usage = +d.total_usage;
+        d.avg_usage = +d.avg_usage;
+    })
+
+    //Assign data (domain) to the scales
+    xScale.domain(d3.extent(data, function(d) { return d.timestamp; }));
+    yScale.domain([0, d3.max(data, function(d) { return d.total_usage; })]);
+    xScale2.domain(xScale.domain());
+    yScale2.domain(yScale2.domain());
+
+    //Graph1, draw axes and line
+    graph1.append("g")
+        .attr("class", "axis axis--x")
+        .attr("transform", "translate(0," + height + ")")
+        .call(xAxis);
+
+    graph1.append("g")
+        .attr("class", "axis axis--y")
+        .call(yAxis);
+    
+    //Add the axis title
+    graph1.append("text")
+        .attr("class", "axis-title")
+        .attr("transform", "rotate(-90)")
+        .attr("y", 0 - margin.left)
+        .attr("x",0 - (height / 2))
+        .attr("dy", "1em")
+        .text("Total Energy Consumption (Wh)"); 
+    
+    graph1.append("text")
+        .attr("class", "axis-title")
+        .attr("y", height + margin.top)
+        .attr("x", (width / 2))
+        .attr("dy", "1em")
+        .text("Time"); 
+
+    Line_chart.append("path")
+        .data([data])
+        .attr("class", "line")
+        .attr("d", totalLine);
+
+    //Graph2, draw x axis and line
+    graph2.append("g")
+      .attr("class", "axis axis--x")
+      .attr("transform", "translate(0," + height2 + ")")
+      .call(xAxis2);
+
+    graph2.append("path")
+        .data([data])
+        .attr("class", "line")
+        .attr("d", totalLine2);
+
+    //Add the axis title
+
+
+    //Apply the brush behaviour on graph2
+    graph2.append("g")
+        .attr("class", "brush")
+        .call(brush)
+        .call(brush.move, xScale.range());
+
+    //Apply the zoom behaviour to a rectangle on top of graph1
+    graph1.append("rect")
+        .attr("class", "zoom")
+        .attr("width", width)
+        .attr("height", height)
+        .call(zoom);
+    
+
+});
+
+
+//Define the brush function
+function brushed() {
+  if (d3.event.sourceEvent && d3.event.sourceEvent.type === "zoom") return; // ignore brush-by-zoom
+  var s = d3.event.selection || xScale2.range();
+  xScale.domain(s.map(xScale2.invert, xScale2));
+  Line_chart.select(".line").attr("d", totalLine);
+  graph1.select(".axis--x").call(xAxis);
+  svg.select(".zoom").call(zoom.transform, d3.zoomIdentity
+      .scale(width / (s[1] - s[0]))
+      .translate(-s[0], 0));
+}
+
+//Define the zoom function
+function zoomed() {
+  if (d3.event.sourceEvent && d3.event.sourceEvent.type === "brush") return; // ignore zoom-by-brush
+  var t = d3.event.transform;
+  xScale.domain(t.rescaleX(xScale2).domain());
+  Line_chart.select(".line").attr("d", totalLine);
+  graph1.select(".axis--x").call(xAxis);
+  graph2.select(".brush").call(brush.move, xScale.range().map(t.invertX, t));
+}
+
+</script>
 
 {% endblock %}
+
