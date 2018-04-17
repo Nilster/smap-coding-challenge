@@ -5,7 +5,7 @@ from consumption.models import User, Usage
 from datetime import datetime
 from django.utils import timezone
 from django.urls import reverse
-import random
+from django.db.models import Sum, Avg, DecimalField
 
 # Create your tests here.
 #Test that you can create a user
@@ -41,12 +41,14 @@ class SummaryViewTest(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        for user_num in range(15):
+        current_t = datetime.now(tz=timezone.get_default_timezone())
+        for user_num in range(10):
             user = User.objects.create(user_id=user_num,area='a'+str(user_num),tariff='t'+str(user_num))
-            for consumption in range(10):
+            usage_t = current_t - timezone.timedelta(minutes=(30*user_num))
+            for i in reversed(range(10)):
                 usage = Usage.objects.create(user_id=user, \
-                                            timestamp=datetime.now(tz=timezone.utc), \
-                                            consumption=random.randrange(30,50), \
+                                            timestamp=usage_t, \
+                                            consumption=i*10, \
                                             filename=r'C:\test_%s.csv' % str(user_num) ) 
 
     def test_view_summary_url_exists(self):
@@ -62,3 +64,9 @@ class SummaryViewTest(TestCase):
         self.assertEqual(resp.status_code, 200)
 
         self.assertTemplateUsed(resp, 'consumption/summary.html')
+
+    #Some additional tests for annotation
+    def test_summary_total_annotation(self):
+        user_summary = User.objects.annotate(total_usage=Sum('usage__consumption')).order_by('user_id')
+        #For any user the total consumption would be 450 
+        self.assertEqual(user_summary.first().total_usage, 450)
