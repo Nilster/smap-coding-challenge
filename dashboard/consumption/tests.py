@@ -2,10 +2,10 @@
 from __future__ import unicode_literals
 from django.test import TestCase
 from consumption.models import User, Usage
-from datetime import datetime
 from django.utils import timezone
 from django.urls import reverse
 from django.db.models import Sum, Avg, DecimalField
+
 
 # Create your tests here.
 #Test that you can create a user
@@ -26,7 +26,7 @@ class UsageModelTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
         test_user = User.objects.create(user_id=991,area='a1',tariff='t1')
-        Usage.objects.create(user_id=test_user,timestamp=datetime.now(), consumption=111, filename=r'C:\test.csv')
+        Usage.objects.create(user_id=test_user,timestamp=timezone.now(), consumption=111, filename=r'C:\test.csv')
 
     def test_usage_insert(self):
         usage= Usage.objects.get(id=1)
@@ -41,11 +41,12 @@ class SummaryViewTest(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        current_t = datetime.now(tz=timezone.get_default_timezone())
-        for user_num in range(10):
+        current_t = timezone.now()
+        for user_num in range(15):
             user = User.objects.create(user_id=user_num,area='a'+str(user_num),tariff='t'+str(user_num))
-            usage_t = current_t - timezone.timedelta(minutes=(30*user_num))
             for i in reversed(range(10)):
+                #oldest time would have highest usage
+                usage_t = current_t - timezone.timedelta(minutes=(30*i)) 
                 usage = Usage.objects.create(user_id=user, \
                                             timestamp=usage_t, \
                                             consumption=i*10, \
@@ -70,3 +71,12 @@ class SummaryViewTest(TestCase):
         user_summary = User.objects.annotate(total_usage=Sum('usage__consumption')).order_by('user_id')
         #For any user the total consumption would be 450 
         self.assertEqual(user_summary.first().total_usage, 450)
+
+    def test_summary_timed_total(self):
+        #For the oldest time, total consumption for all the users would be 90*15
+        total_summary = Usage.objects.values('timestamp') \
+                                .annotate(total_usage=Sum('consumption'), \
+                                          avg_usage=Avg('consumption',output_field=DecimalField(max_digits=10, decimal_places=1))) \
+                                .order_by('timestamp')
+        oldest_total_usage = total_summary[0]['total_usage']
+        self.assertEqual(oldest_total_usage, 1350)
